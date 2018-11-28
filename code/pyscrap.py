@@ -1,16 +1,19 @@
 import urllib.request
 from urllib.error import URLError, HTTPError, ContentTooShortError
-import re
-import itertools
 from urllib.parse import urljoin
 from urllib import robotparser
 from urllib.parse import urlparse
+import re   # reglar expression
+import itertools
 import time
+import csv
+from lxml.html import fromstring
 
 # WSWP:Web Scraping Witch Python
 def download(url, user_agent = 'wswp', num_retries = 2, charset = 'utf-8', proxy = None):
     """
-        Use user-agent to download website pages, and will try a few times after website return 5** error code
+        Use user-agent to download website pages and return HTML TEXT, and will try a few times after website return 5** error code
+        return urllib.request.urlopen(urllib.request.Request(url)).read().decode('utf-8')
     """
     print('Downloading:', url)
     request = urllib.request.Request(url)
@@ -38,11 +41,13 @@ def crawl_sitemap(url):
     """
         Download the sitemap file and extract the sitemap links, download each link
         eg: http://example.python-scraping.com/sitemap.xml
+        links = re.findall('<loc>(.*?)</loc>', download(url))
     """
     sitemap = download(url)
     links = re.findall('<loc>(.*?)</loc>', sitemap)
     for link in links:
         html = download(link)
+        print(html) # To anylyse html page's contents
 
 def crawl_site(url, max_errors = 5):
     """
@@ -59,10 +64,12 @@ def crawl_site(url, max_errors = 5):
             num_errors += 1
             if num_errors == max_errors:
                 break
+        else:
+            print(html) # To anylyse html page's contents
 
 def link_crawler(start_url, link_regex, robots_url = None, user_agent = 'wswp', max_depth = 4):
     """
-        Crawl from the given start URL following links matched by link_regex
+        Crawl from the given start URL and crawl following links matched by link_regex in the html pages
         eg: link_regex = '/(index|view)/'
         eg: http://example.python-scraping.com/view/index/1
         eg: http://example.python-scraping.com/view/Afghanistan-1
@@ -85,10 +92,10 @@ def link_crawler(start_url, link_regex, robots_url = None, user_agent = 'wswp', 
                 continue
             # Filter for links matching our regular expression
             for link in get_links(html):
-                if re.match(link_regex, link):
+                if re.match(link_regex, link):  # Effective links
                     abs_link = urljoin(start_url, link)
                     if abs_link not in seen:
-                        seen[abs_link] = depth + 1
+                        seen[abs_link] = depth + 1  # Note the depth of pages which have been seen 
                         crawl_queue.append(link)
         else:
             print('Blocked by robots.txt: ', url)
@@ -111,7 +118,7 @@ def get_robots_parser(robots_url):
 
 class Throttle:
     """
-        Add a delay between downloads for each domain
+        Add a delay between downloads for each domain in case that the websites add the IP into blacklist
     """
     def __init__(self, delay):
         self.delay = delay
@@ -126,3 +133,15 @@ class Throttle:
             if sleep_secs > 0:
                 time.sleep(sleep_secs)
         self.domains[domain] = time.time()
+
+class CsvCallback:
+    def __init__(self):
+        self.writer = csv.writer(open('../data/countries_or_distritcs.csv', 'w'))
+        self.fields = ('area', 'population', 'iso', 'country_or_district', 'capital', 'continent', 'tld', 'currency_code', 'currency_name', 'phone', 'postal_code_format', 'postal_code_regex', 'languages', 'neighbours')
+        self.writer.writerow(self.fields)
+
+    def __call__(self, url, html):
+        if re.search('/view/', url):
+            tree = fromstring(html)
+            all_rows = [tree.xpath('//tr[@id="places_%s_row"]/td[@class="w2p_fw"]' % field)[0].text_content() for field in self.fields]
+            self.writer.writerow(all_rows)
